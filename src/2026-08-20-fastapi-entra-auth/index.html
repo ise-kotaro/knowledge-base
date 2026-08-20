@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>FastAPI で Entra ID 認証付き API を実装する</title>
+<style>
+body { max-width: 760px; margin: 40px auto; padding: 0 16px;
+       font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+       line-height: 1.8; color: #24292f; }
+h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: .2em; margin-top: 2em; }
+code { background: #eff1f3; padding: .15em .4em; border-radius: 6px;
+       font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
+th { background: #f6f8fa; }
+blockquote { border-left: 4px solid #d0d7de; margin: 0; padding: 0 16px; color: #57606a; }
+a { color: #0969da; }
+hr { border: none; border-top: 1px solid #d0d7de; }
+.footnotes { font-size: .9em; color: #57606a; }
+.footnotes sup { font-size: inherit; }
+</style>
+</head>
+<body>
+<p><small>2026-08-20 / [fastapi, python, entra-id, jwt, oauth, oidc]</small></p>
+<h1>FastAPI で Entra ID 認証付き API を実装する</h1>
+<h2>概要</h2>
+<p>Entra ID のような IdP に認証を委譲する構成では、API 側が担うのはアクセストークンの検証だけである。<br>
+本ノートは、FastAPI 製の API を Entra ID が発行する JWT で保護する最小実装と、その動作確認のやり方をまとめた補足ノートである。<br>
+Entra ID 自体の解説は「<a href="../2026-08-20-entra-id-overview/index.html">Entra ID とは</a>」を参照。</p>
+<h2>構成要素と API 側の責務</h2>
+<p>認証を委譲する構成の登場人物は3つである。</p>
+<table><thead><tr><th>役割</th><th>担当すること</th></tr></thead><tbody><tr><td>IdP（認可サーバー）</td><td>ユーザーの認証とトークンの発行。Entra ID が担う</td></tr><tr><td>クライアント</td><td>認可コードフロー＋PKCE でトークンを取得する。本ノートの扱い外</td></tr><tr><td>リソースサーバー</td><td>トークンを検証して保護対象を返す。FastAPI アプリがこれ</td></tr></tbody></table>
+<p>リソースサーバー側が実装すべき検証は、次の3点に集約される。</p>
+<ol><li>署名の検証。JWKS から鍵を kid で引いて行う</li><li><code>iss</code>（発行者）、<code>aud</code>（宛先が自分の API か）、<code>exp</code>（有効期限）の確認</li><li><code>scp</code> や <code>roles</code> のクレームを見た認可の分岐<sup id="ref1"><a href="#fn1">[1]</a></sup></li></ol>
+<h2>認証はどこで起きるか</h2>
+<p>認証そのものは FastAPI 側では一切行われない。<br>
+本人確認（パスワードや多要素認証の入力）は Entra ID のログイン画面上で行われ、API に届くのは認証済みであることの証明としての JWT だけである。</p>
+<p>流れの全体像は次のとおりである。</p>
+<pre><code>1. ユーザーがクライアントの「ログイン」を押す
+2. クライアントはブラウザを Entra ID の認可エンドポイントにリダイレクトする
+3. ユーザーは Entra ID の画面でサインインする          ← 認証はここ
+4. Entra ID が認可コードをクライアントに返す
+5. クライアントは認可コードと PKCE の verifier を token エンドポイントに送る
+6. Entra ID がアクセストークン（JWT）を発行する
+7. クライアントは JWT を Authorization: Bearer に付けて API を叩く
+8. API は署名・iss・aud・exp を検証して受け入れる      ← 本ノートの実装範囲</code></pre>
+<p>この住み分けにより、API 側はパスワードを一切扱わなくて済む。<br>
+パスワードの保存やリセットは IdP の責務であり、これが認証を委譲する構成の利点である。</p>
+<h2>実装</h2>
+<p>検証の核心は <code>auth.py</code> の数行である。</p>
+<pre><code class="language-python">return jwt.decode(
+    token,
+    self._resolve_key(token),
+    algorithms=[&quot;RS256&quot;],
+    audience=self.audience,
+    issuer=self.issuer,
+    options={&quot;require&quot;: [&quot;exp&quot;, &quot;iat&quot;, &quot;iss&quot;, &quot;aud&quot;]},
+)</code></pre>
+<p>本番の鍵解決は、JWKS を取得してキャッシュする PyJWKClient が担う。<br>
+JWKS の URL はテナントの discovery 文書が指すものと同じで、テナント ID から機械的に組み立てられる。<br>
+一方、テストでは <code>key_resolver</code> に関数を差し込めるようにしてあり、ネットワークなしで検証経路を動かせる。</p>
+<p><code>main.py</code> 側は、FastAPI の依存注入で保護を書く。</p>
+<ul><li><code>current_user</code> が Bearer トークンを検証してクレームを返す。トークンなし・不正は 401</li><li><code>/admin</code> はクレームの <code>roles</code> に「Admin」が無ければ 403</li></ul>
+<h2>動作確認</h2>
+<p>手元に Entra テナントがなくても全経路を確認できるよう、ローカルで生成した RSA 鍵ペアを IdP に見立てている。<br>
+署名の仕組み（RS256、公開鍵による検証、kid の付与）は本番と同じものが動く。</p>
+<pre><code class="language-bash">cd src/2026-08-20-fastapi-entra-auth
+uv run demo_test.py   # 依存はスクリプト先頭の PEP 723 メタデータから uv が自動解決する</code></pre>
+<p>実行結果は次のとおりで、全8ケースが成功した。</p>
+<pre><code class="language-console">PASS: 認証不要の /public はトークンなしで200
+PASS: /me はトークンなしで401
+PASS: /me は正しいトークンで200
+PASS: /me の応答に sub が入る
+PASS: 期限切れトークンは401
+PASS: aud不一致は401
+PASS: iss不一致（なりすまし）は401
+PASS: /admin はロールなしで403 / Adminロール付きで200</code></pre>
+<h2>本番の Entra ID につなぐ</h2>
+<p>環境変数に <code>ENTRA_TENANT_ID</code> と <code>ENTRA_CLIENT_ID</code> を渡せば、検証器が本物のエンドポイントを指す。<br>
+実機での検証は未実施で、Entra テナントとアプリ登録が必要になる。</p>
+<h2>関連ノート</h2>
+<ul><li><a href="../2026-08-20-entra-id-overview/index.html">Entra ID とは</a></li></ul>
+<section class="footnotes"><hr><ol><li id="fn1">「scp」は委任された権限（scope）、「roles」はアプリケーションロールの列である。どちらも Entra 管理センターのアプリ登録で定義する。 <a href="#ref1">&#8617;</a></li></ol></section>
+</body>
+</html>
