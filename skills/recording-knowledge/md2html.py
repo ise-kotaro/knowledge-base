@@ -75,12 +75,25 @@ def _footnote_sub(m):
     return f'<sup id="{rid}"><a href="#fn{n}">[{n}]</a></sup>'
 
 
+def _link_sub(m):
+    text, href = m.group(1), m.group(2)
+    if href.endswith(".md") and not re.match(r"^[a-zA-Z]+://", href):
+        parts = href.split("/")
+        stem = parts[-1][:-3]
+        if stem == "README" or stem.startswith("README-"):
+            parts[-1] = "index" + stem[len("README"):] + ".html"
+        else:
+            parts[-1] = stem + ".html"
+        href = "/".join(parts)
+    return f'<a href="{href}">{text}</a>'
+
+
 def inline(text):
     text = html.escape(text)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"\*([^*]+?)\*", r"<em>\1</em>", text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", _link_sub, text)
     text = re.sub(r"\[\^([^\]]+)\]", _footnote_sub, text)
     return text
 
