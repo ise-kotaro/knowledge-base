@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>tombstone（削除マーカー）とは</title>
+<style>
+body { max-width: 760px; margin: 40px auto; padding: 0 16px;
+       font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+       line-height: 1.8; color: #24292f; }
+h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: .2em; margin-top: 2em; }
+code { background: #eff1f3; padding: .15em .4em; border-radius: 6px;
+       font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
+th { background: #f6f8fa; }
+blockquote { border-left: 4px solid #d0d7de; margin: 0; padding: 0 16px; color: #57606a; }
+a { color: #0969da; }
+hr { border: none; border-top: 1px solid #d0d7de; }
+.footnotes { font-size: .9em; color: #57606a; }
+.footnotes sup { font-size: inherit; }
+</style>
+</head>
+<body>
+<p><small>2026-08-24 / [tombstone, soft-delete, database, distributed-systems, cassandra, kafka]</small></p>
+<h1>tombstone（削除マーカー）とは</h1>
+<h2>概要</h2>
+<p>データベースやメッセージング基盤に「このデータを消したい」と伝えるとき、対象を即座に物理削除する代わりに、「消えた」という印だけを書き込んでおく方式がある。<br>
+その印を <strong>tombstone</strong>（削除マーカー）と呼ぶ。<sup id="ref1"><a href="#fn1">[1]</a></sup><br>
+データ本体の除去は後段の整理処理に任せ、墓石自体も最終的にはそこで回収される。<br>
+ソフトデリートに近い発想であるが、文脈によって具体的な姿が異なる。</p>
+<h2>基本的な動作</h2>
+<p>削除の要求は墓石の書き込みとして処理され、読み取り側は墓石を見て削除済みと判断する。<br>
+本体の物理的な除去は遅延される。</p>
+<pre><code>書き込み:  {key: &quot;user1&quot;, value: &quot;kotaro&quot;}    ← データ本体
+削除要求:  {key: &quot;user1&quot;, tombstone: true}    ← 墓石として追記
+回収:      コンパクション等で本体と墓石をまとめて除去</code></pre>
+<h2>なぜ墓石を残すのか</h2>
+<p>本体ごと消してしまわない理由は一つではない。<br>
+主なものを腑分けすると次のとおりである。</p>
+<ul><li><strong>削除の伝播</strong>：分散環境で本体を即時削除すると、削除に気づいていない複製ノードからデータが復活する（Cassandra はこの現象を「ゾンビ」と呼ぶ）。墓石が残っていれば、後から復旧したノードにも「消えた」という事実を伝えられる。</li><li><strong>追記型ストレージとの相性</strong>：LSM ツリー（書き込みを順次追記して後で整理するストレージ構造）では既存データの書き換えができないため、削除も墓石の追記として表現する必要がある。</li><li><strong>証跡の保持</strong>：GDPR の「忘れられる権利」のような要請では、個人情報そのものは消す一方、「いつ削除要求があって消したか」の記録は残したい。ID と削除日時だけを持つ墓石がこの両立を可能にする。</li><li><strong>参照整合性</strong>：他のデータから参照されている行を物理削除すると参照が壊れるが、墓石として残せば「削除済みのユーザー」といった表示に置き換えられる。</li></ul>
+<h2>文脈ごとの姿</h2>
+<ul><li><strong>分散データベース（Cassandra）</strong>：DELETE は墓石の書き込みとして処理される。墓石には猶予期間（<code>gc_grace_seconds</code>、デフォルト10日）があり、期間を過ぎたものがコンパクションで本体ごと回収される。</li><li><strong>メッセージング（Kafka）</strong>：ログ圧縮を有効にしたトピックで、あるキーに値が null のメッセージを書き込むと墓石として扱われ、同じキーの古いメッセージが除去対象になる。</li><li><strong>イベント駆動・DDD</strong>：集約の削除を削除イベントとして発行し、それを購読する read model（検索・表示用に複製されたデータ）が投影を消す。この削除イベントが墓石の役割を果たす。</li><li><strong>RDB の論理削除</strong>：<code>deleted_at</code> 列に時刻を入れる方式と対比される形で、本体の行を消して ID と削除日時だけを持つ抜け殻テーブル（墓石テーブル）に残す方式を tombstone 方式と呼ぶことがある。</li></ul>
+<h2>ソフトデリートとの違い</h2>
+<p>広義には墓石方式もソフトデリート（論理削除）の一種だが、実務の対比では「本体を残すか、消すか」が分かれ目になる。</p>
+<table><thead><tr><th></th><th><code>deleted_at</code> 方式</th><th>tombstone 方式</th></tr></thead><tbody><tr><td>データ本体</td><td>残る</td><td>消す（ID と削除日時程度のみ残す）</td></tr><tr><td>復元</td><td>可能</td><td>基本的に不可能</td></tr><tr><td>クエリへの影響</td><td><code>WHERE deleted_at IS NULL</code> を全クエリに必要</td><td>墓石は別テーブルに隔離できる</td></tr></tbody></table>
+<p>復元の要件があるなら <code>deleted_at</code> 方式が向く。<br>
+法的な削除義務への対応や、参照整合性を保ちつつ本体を消したい場合は tombstone 方式が向く。</p>
+<h2>運用上の注意</h2>
+<p>墓石の蓄積は性能劣化の元になる。<br>
+読み取りが多くの墓石を跨がなければならないためで、Cassandra では墓石の増加によるクエリ劣化がよく知られた落とし穴である。<br>
+回収はコンパクション次第なので、大量削除を伴う設計では回収状況の監視が要る。<br>
+また tombstone 方式は基本的に元に戻せないため、採用前に復元要件の有無を確認する。</p>
+<h2>GitHub で「消えた」ときに残るもの</h2>
+<p>GitHub でコンテンツが消える際に墓石が残るかどうかは、消され方で異なる。</p>
+<ul><li><strong>リポジトリの完全削除</strong>：墓石は残らない。URL は単に 404 を返す。</li><li><strong>DMCA テイクダウン</strong>：「This repository is currently disabled due to a DMCA takedown notice.」というページが残り、通知書自体は <a href="https://github.com/github/dmca">github/dmca</a> リポジトリに公開アーカイブされる。</li><li><strong>他サービスへの移転</strong>：「moved to ...」だけを書いた README の抜け殻を残す運用があり、これは俗に墓石リポジトリと呼ばれる。</li><li><strong>ユーザーアカウントの削除</strong>：削除されたアカウントのコメントやコミットは <a href="https://github.com/ghost">ghost</a> ユーザーに付け替えられる。発言者を墓石化して発言自体を残す仕組みである。</li></ul>
+<h2>サンプルコード</h2>
+<p>RDB での tombstone 方式のデモである。<br>
+本体テーブルの行は DELETE し、墓石テーブルには ID と削除日時だけを残す。<br>
+完全版は同じディレクトリの <code>demo.sql</code> で、SQLite での実行確認済みである。</p>
+<pre><code class="language-sql">-- 退会処理（抜粋）：本体は消し、墓石だけを挿入する
+BEGIN;
+INSERT INTO user_tombstones (user_id, deleted_at)
+  VALUES (1, &#x27;2026-08-24 10:00:00&#x27;);
+DELETE FROM users WHERE id = 1;
+COMMIT;</code></pre>
+<p>実行と結果は次のとおりである。</p>
+<pre><code class="language-console">$ sqlite3 -header -column &lt; demo.sql
+id  item    ordered_by        
+--  ------  ------------------
+1   リンゴ  (削除済みユーザー)
+2   バナナ  hanako            </code></pre>
+<h2>出典</h2>
+<ul><li><a href="https://cassandra.apache.org/doc/latest/cassandra/managing/operating/compaction/tombstones.html">Tombstones | Apache Cassandra Documentation</a></li><li><a href="https://kafka.apache.org/documentation/#compaction">Apache Kafka Documentation - Log Compaction</a></li><li><a href="https://github.com/github/dmca">github/dmca | GitHub</a></li><li><a href="https://github.com/ghost">@ghost | GitHub</a></li></ul>
+<section class="footnotes"><hr><ol><li id="fn1">tombstone は英語で「墓石」を意味する一般名詞であり、消えたデータの墓標という比喩である。 <a href="#ref1">&#8617;</a></li></ol></section>
+</body>
+</html>
