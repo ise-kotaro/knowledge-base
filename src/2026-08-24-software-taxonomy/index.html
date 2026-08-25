@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>タクソノミーとは（ソフトウェアの文脈）</title>
+<style>
+body { max-width: 760px; margin: 40px auto; padding: 0 16px;
+       font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+       line-height: 1.8; color: #24292f; }
+h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: .2em; margin-top: 2em; }
+code { background: #eff1f3; padding: .15em .4em; border-radius: 6px;
+       font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
+th { background: #f6f8fa; }
+blockquote { border-left: 4px solid #d0d7de; margin: 0; padding: 0 16px; color: #57606a; }
+a { color: #0969da; }
+hr { border: none; border-top: 1px solid #d0d7de; }
+.footnotes { font-size: .9em; color: #57606a; }
+.footnotes sup { font-size: inherit; }
+</style>
+</head>
+<body>
+<p><small>2026-08-24 / [taxonomy, classification, information-architecture, controlled-vocabulary, ddd]</small></p>
+<h1>タクソノミーとは（ソフトウェアの文脈）</h1>
+<h2>概要</h2>
+<p>ソフトウェアの文脈で <strong>タクソノミー</strong>（taxonomy）とは、情報や概念を共通の性質で整理した分類体系のことである。<br>
+語は生物学の分類学に由来し、生物を階層に整理する学問が原型である。<sup id="ref1"><a href="#fn1">[1]</a></sup><br>
+ソフトウェアでは主に、コンテンツやデータに「どのグループに属するか」を与えるための仕組み、あるいはその分類設計そのものを指す。</p>
+<h2>どこに登場するか</h2>
+<p>タクソノミーという語そのものが表に出る場面と、名前こそ出ないが中身はタクソノミーになっている場面がある。</p>
+<ul><li><strong>CMS のコンテンツ分類</strong>：WordPress は投稿をまとめる仕組みを公式に「タクソノミー」と呼ぶ。標準ではカテゴリーとタグの2種類があり、独自の分類軸（カスタムタクソノミー）も登録できる。タクソノミーが「親」、その中の各項目（「映画」「音楽」など）は「term（ターム）」と呼ばれる。</li><li><strong>EC サイトの商品カテゴリ</strong>：「家電 &gt; パソコン &gt; ノートPC」のような階層カテゴリは典型的なタクソノミーであり、絞り込み検索（ファセット検索）の土台になる。</li><li><strong>脆弱性・弱点の分類</strong>：MITRE の CWE（Common Weakness Enumeration）は、ソフトウェアとハードウェアの弱点を体系的に分類したリストで、公式に「分類タクソノミー」と位置づけられている。</li><li><strong>機械学習のラベル体系</strong>：画像認識データセットの ImageNet は、語彙データベース WordNet の名詞の分類階層を土台に構築されている。</li><li><strong>バックログやナレッジの整理</strong>：不具合の種別、問い合わせのカテゴリ、社内 Wiki の記事分類など、名前を意識しないところにもタクソノミーは埋め込まれている。</li></ul>
+<h2>タクソノミーを構成する要素</h2>
+<p>分類体系を設計・評価するときに出てくる構成要素は次の3つである。</p>
+<ul><li><strong>階層（is-a 関係）</strong>：親子関係は「子は親の一種」で貫く。「ノートPC は パソコンの一種」と言い換えられる関係だけを階層にする。</li><li><strong>term（項）</strong>：分類を構成する各項目のこと。カテゴリ名やラベルがこれにあたる。</li><li><strong>統制語彙（controlled vocabulary）</strong>：使う語をあらかじめ定めて揃えること。「PC」「パソコン」のような表記揺れを放置すると、同じものが別の分類先に散らばって体系が崩れる。</li></ul>
+<h2>近い概念との違い</h2>
+<p>タクソノミーは似た語と混同されやすいので、境界を整理しておく。</p>
+<table><thead><tr><th>概念</th><th>タクソノミーとの違い</th></tr></thead><tbody><tr><td>タグ</td><td>階層を持たないフラットなラベル。タクソノミーは多くの場合、親子の階層を持つ</td></tr><tr><td>フォークソノミー</td><td>ユーザー全員の自由なタグ付けから生まれるボトムアップの分類。folk と taxonomy のかばん語で、管理者が事前設計するタクソノミーと対になる</td></tr><tr><td>オントロジー</td><td>分類に加えて、概念どうしの関係（「AはBの一部」「AはBを使う」）や制約まで形式化する。タクソノミーが扱うのは主に is-a の親子関係だけ</td></tr></tbody></table>
+<p>厳密には、タグは階層を持つタクソノミーの一部として使われることもある。<br>
+WordPress の「タグ」はカテゴリーと並ぶ標準タクソノミーの一種であり、違いは階層を持つかどうかにある。</p>
+<h2>設計の指針</h2>
+<p>タクソノミーは作ることより運用が難しい。<br>
+破綻を遅らせるための指針は次のとおりである。</p>
+<ul><li><strong>is-a で検査する</strong>：「子は親の一種か」と読んで意味が通るかで、階層の妥当性を確認できる。通らない配置（「都道府県 &gt; 東京駅」など）は、分類軸が混ざっている兆候である。</li><li><strong>同じ階層は MECE に保つ</strong>：漏れなく、ダブりなく（Mutually Exclusive, Collectively Exhaustive）。分類先が複数にまたがる項目が増えてきたら、分類軸そのものを見直す。</li><li><strong>階層は浅く保つ</strong>：深い階層は利用者が迷い、管理者も整合を保てなくなる。3〜4階層に収めるのが一般的な目安である。</li><li><strong>用途から軸を決める</strong>：管理者に都合のよい軸ではなく、利用者が探すときの軸で設計する。ナビゲーション用と内部管理用で、別々のタクソノミーを併用してもよい。</li></ul>
+<h2>コード設計との関係</h2>
+<p>分類の発想はコードにもそのまま現れる。<br>
+クラスの継承階層や名前空間、ディレクトリ構造は、is-a で検査できる一種のタクソノミーである。<br>
+DDD におけるユビキタス言語（ドメインの用語をチームで統一する語彙）は統制語彙と同じ発想であり、ドメインの分類が曖昧なままだと、継承関係やコンテキストの境界にも歪みとして表れる。</p>
+<h2>出典</h2>
+<ul><li><a href="https://wordpress.org/documentation/article/taxonomies/">Taxonomies | WordPress.org Documentation</a></li><li><a href="https://cwe.mitre.org/about/index.html">About CWE | MITRE</a></li><li><a href="https://www.image-net.org/">ImageNet</a></li></ul>
+<section class="footnotes"><hr><ol><li id="fn1">分類学はリンネの階層分類（界から種まで段階的に絞り込んでいく体系）で知られる。語源はギリシャ語の taxis（配列）と nomos（法則）。 <a href="#ref1">&#8617;</a></li></ol></section>
+</body>
+</html>
