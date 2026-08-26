@@ -3,7 +3,7 @@ title: タクソノミーとは（ソフトウェアの文脈）
 date: 2026-08-24
 updated: 2026-08-24
 tags: [taxonomy, classification, information-architecture, controlled-vocabulary, ddd]
-related: []
+related: [src/2026-08-25-rest-facets-hateoas/]
 ---
 
 # タクソノミーとは（ソフトウェアの文脈）
@@ -68,3 +68,7 @@ DDD におけるユビキタス言語（ドメインの用語をチームで統�
 - [Taxonomies | WordPress.org Documentation](https://wordpress.org/documentation/article/taxonomies/)
 - [About CWE | MITRE](https://cwe.mitre.org/about/index.html)
 - [ImageNet](https://www.image-net.org/)
+
+## 関連ノート
+
+- [REST API のファセットと HATEOAS](../2026-08-25-rest-facets-hateoas/README.md)

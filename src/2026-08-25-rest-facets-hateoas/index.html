@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>REST API のファセットと HATEOAS</title>
+<style>
+body { max-width: 760px; margin: 40px auto; padding: 0 16px;
+       font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+       line-height: 1.8; color: #24292f; }
+h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: .2em; margin-top: 2em; }
+code { background: #eff1f3; padding: .15em .4em; border-radius: 6px;
+       font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
+th { background: #f6f8fa; }
+blockquote { border-left: 4px solid #d0d7de; margin: 0; padding: 0 16px; color: #57606a; }
+a { color: #0969da; }
+hr { border: none; border-top: 1px solid #d0d7de; }
+.footnotes { font-size: .9em; color: #57606a; }
+.footnotes sup { font-size: inherit; }
+</style>
+</head>
+<body>
+<p><small>2026-08-25 / [rest, api-design, facets, faceted-search, hateoas, hypermedia]</small></p>
+<h1>REST API のファセットと HATEOAS</h1>
+<h2>概要</h2>
+<p>検索系の REST API で隣り合わせに出てくる2つの概念、ファセットと HATEOAS をまとめたノートである。<br>
+<strong>ファセット</strong>（facets）は、検索結果を属性ごとに集計し、絞り込み候補としてクライアントに返す仕組みを指す。<sup id="ref1"><a href="#fn1">[1]</a></sup><br>
+<strong>HATEOAS</strong>（Hypermedia as the Engine of Application State）は、REST の制約の1つで、レスポンスに埋め込まれたリンクをたどることでアプリケーションの状態を遷移させる設計原則である。<br>
+両者は別の話題であるが、ファセットの各候補をリンクとして返す設計で接点を持つ。</p>
+<h2>ファセットのやり取り</h2>
+<p>ファセットの典型例は、EC サイトの絞り込み欄に出る「ブランド: Nike (12)／Adidas (8)」のような候補と件数の一覧である。<br>
+この仕組みはファセット検索（faceted search）、またはファセットナビゲーションと呼ばれる。</p>
+<p>基本的なやり取りは次の流れになる。</p>
+<ol><li>クライアントがキーワードで検索する</li><li>サーバーが結果一覧とファセットを同じレスポンスで返す</li><li>ユーザーがファセットの値を選ぶ</li><li>クライアントがその値を条件に加えて再検索する</li></ol>
+<p>最初のリクエストとレスポンスの例。</p>
+<pre><code class="language-http">GET /products?q=sneakers</code></pre>
+<pre><code class="language-json">{
+  &quot;total&quot;: 125,
+  &quot;items&quot;: [&quot;...&quot;],
+  &quot;facets&quot;: [
+    {
+      &quot;field&quot;: &quot;brand&quot;,
+      &quot;values&quot;: [
+        { &quot;value&quot;: &quot;Nike&quot;, &quot;count&quot;: 12 },
+        { &quot;value&quot;: &quot;Adidas&quot;, &quot;count&quot;: 8 }
+      ]
+    }
+  ]
+}</code></pre>
+<p>ユーザーが Nike を選んだあとは、選択済みの値を通常のクエリパラメータで表す。</p>
+<pre><code class="language-http">GET /products?q=sneakers&amp;brand=Nike</code></pre>
+<p>ファセットの役割はあくまで候補の提示であり、絞り込み条件そのものではない。<br>
+この区別を分けておくと、リクエストの意味をクエリパラメータだけで完結させられる。<br>
+なおファセットは REST の制約に含まれる概念ではなく、検索 API で広く使われるデザインパターンである。</p>
+<h2>ファセット設計の論点</h2>
+<p>ファセットを実装するときに詰める必要がある点は主に3つある。</p>
+<ul><li><strong>ファセット除外</strong>（disjunctive faceting）：ブランドで Nike を選んだあとも、ブランド軸のファセットには他ブランドの件数を残したい。残さないと、その時点で他の候補が消えて選び直しができなくなる。機構は単純で、brand 軸の件数を集計するときだけ、brand の絞り込み条件をフィルタから外せばよい。チェックボックスで複数選択できる UI では必須の処理である。</li><li><strong>集計コスト</strong>：件数の集計はマッチした全件を走査するため負荷が大きい。ファセットを別エンドポイントに分ける、集計対象のフィールドをサーバー側の許可リストで絞る、件数が不要なら計算を省略できるオプションにする、といった逃げ道を設計に入れておく。</li><li><strong>権限による情報の漏えい</strong>：閲覧権限のないアイテムを件数に含めると、その存在自体が推測されてしまう。ファセットの集計にも、検索結果と同じ認可フィルタをかける。</li></ul>
+<p>近似に依存する実装もある点には注意が要る。<br>
+Azure AI Search のドキュメントは、シャード分割されたインデックスでは各シャードが上位 N 件だけを返してから統合するため、ファセットの件数が実際より少なく数えられる場合があると明記している。<br>
+正確な件数が要るときは count を十分大きく取るよう案内されており、分散検索基盤のファセット計算は一般に精度とコストのトレードオフがある。</p>
+<h2>主要な検索 API のファセット対応</h2>
+<table><thead><tr><th>API</th><th>指定方法</th><th>レスポンス</th></tr></thead><tbody><tr><td>Azure AI Search</td><td>クエリの <code>facets</code> パラメータにフィールド名を並べる</td><td><code>@search.facets</code></td></tr><tr><td>Elasticsearch</td><td><code>aggs</code>（aggregations）で集計を定義する</td><td><code>aggregations</code></td></tr><tr><td>Solr</td><td><code>facet=true</code> と <code>facet.field=brand</code></td><td><code>facet_counts</code></td></tr><tr><td>Algolia</td><td><code>facets</code> リクエストパラメータに属性名</td><td><code>facets</code></td></tr></tbody></table>
+<h2>HATEOAS の制約</h2>
+<p>HATEOAS は、Fielding が REST を定式化した博士論文（2000年）の第5章で、統一インターフェース（uniform interface）を構成する4つの制約のひとつとして定められた。<br>
+クライアントが事前に知ってよいのは入口の URL だけで、それ以降の操作はすべてサーバーがレスポンスに埋め込んだリンクを選んで進む、という原則である。<br>
+アプリケーションの状態遷移を推進するエンジンがハイパーメディアの中にある、というのが名前の由来である。</p>
+<p>具体例として、注文リソースを考える。<br>
+未発送の状態では、レスポンスにキャンセルと支払いのリンクが含まれる。</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: 1234,
+  &quot;status&quot;: &quot;pending&quot;,
+  &quot;_links&quot;: {
+    &quot;self&quot;:    { &quot;href&quot;: &quot;/orders/1234&quot; },
+    &quot;cancel&quot;:  { &quot;href&quot;: &quot;/orders/1234/cancel&quot; },
+    &quot;payment&quot;: { &quot;href&quot;: &quot;/orders/1234/payment&quot; }
+  }
+}</code></pre>
+<p>発送が済むと、キャンセルのリンクは消え、代わりに追跡用のリンクが現れる。</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: 1234,
+  &quot;status&quot;: &quot;shipped&quot;,
+  &quot;_links&quot;: {
+    &quot;self&quot;:  { &quot;href&quot;: &quot;/orders/1234&quot; },
+    &quot;track&quot;: { &quot;href&quot;: &quot;/orders/1234/tracking&quot; }
+  }
+}</code></pre>
+<p>この設計では、「発送後はキャンセルできない」という業務ルールをクライアントに実装する必要がない。<br>
+リンクの有無がそのまま操作の可否を表し、クライアントは <code>cancel</code> があればボタンを出す、とだけ決めればよい。<br>
+サーバーが URL スキームを変えてもクライアントは壊れず、新しい操作はリンクの追加で告知できる。</p>
+<h2>Richardson 成熟度モデルと現実の落としどころ</h2>
+<p>HATEOAS の位置づけを考えるのに便利なのが、<strong>Richardson 成熟度モデル</strong>（Richardson Maturity Model）である。<br>
+Leonard Richardson がカンファレンスでの講演で提唱し、Martin Fowler の記事で広まった分類で、REST 風味の度合いを4段階で見る。</p>
+<table><thead><tr><th>レベル</th><th>内容</th></tr></thead><tbody><tr><td>0</td><td>HTTP をトンネルにした RPC 的な呼び出し。単一の URL に POST を送りつける</td></tr><tr><td>1</td><td>リソースを導入し、対象ごとに URL を分ける</td></tr><tr><td>2</td><td>HTTP メソッドとステータスコードを規則どおりに使う</td></tr><tr><td>3</td><td>ハイパーメディア制御（HATEOAS）を導入する</td></tr></tbody></table>
+<p>原理主義の側からは厳しい見方がある。<br>
+Fielding はブログ記事「REST APIs must be hypertext-driven」（2008年）で、ハイパーテキスト駆動でないものは REST API と呼ぶべきでないと明言し、Fowler の記事もレベル3 が REST の前提条件だという Fielding の見解を紹介している。</p>
+<p>ただし実際の現場では、REST API と呼ばれるものの大半はレベル2どまりである。<br>
+クライアント側に汎用的なリンク解釈の層を作るコストがかかること、レスポンスが肥大すること、フロントエンドの操作が事前に決まっていて固定実装になりがちなことが、その理由として挙げられる。<br>
+レベル3 を目指す場合のリンク表現には標準もあり、HAL（JSON Hypertext Application Language）は <code>_links</code> と <code>_embedded</code> を定義する軽量なメディアタイプで、JSON:API はリレーションシップとリンクの仕様を持つ。</p>
+<h2>ファセットと HATEOAS の接点</h2>
+<p>ファセットの各候補は、現在の検索状態から取りうる次の遷移そのものである。<br>
+したがって各値をリンクつきで返すと、絞り込み UI がそのまま HATEOAS 式になる。</p>
+<pre><code class="language-json">{ &quot;value&quot;: &quot;Nike&quot;, &quot;count&quot;: 12, &quot;href&quot;: &quot;/products?q=sneakers&amp;brand=Nike&quot; }</code></pre>
+<p>この形では、クライアントは「どのパラメータ名で絞り込むか」という URL の組み立て規則を知らなくて済む。<br>
+サーバー側がパラメータ設計を変えても、クライアントはリンクをたどるだけで追従できる。</p>
+<h2>別文脈の「facet」</h2>
+<p>OData（Microsoft 系の API 標準）のスキーマ定義言語 CSDL にも facet という語が出るが、こちらはプロパティに付随するメタデータ属性（Nullable、MaxLength、Precision など）を指し、検索のファセットとは別物である。</p>
+<h2>出典</h2>
+<ul><li><a href="https://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">Chapter 5: Representational State Transfer (REST) | Fielding, Architectural Styles and the Design of Network-based Software Architectures</a></li><li><a href="https://martinfowler.com/articles/richardsonMaturityModel.html">Richardson Maturity Model | Martin Fowler</a></li><li><a href="https://roy.gbiv.com/untangled/2008/rest-apis-must-be-hypertext-driven">REST APIs must be hypertext-driven | Roy T. Fielding</a></li><li><a href="https://learn.microsoft.com/en-us/azure/search/search-faceted-navigation">Add Facets to a Query | Microsoft Learn (Azure AI Search)</a></li></ul>
+<h2>関連ノート</h2>
+<ul><li><a href="../2026-08-24-software-taxonomy/index.html">タクソノミーとは（ソフトウェアの文脈）</a></li></ul>
+<section class="footnotes"><hr><ol><li id="fn1">facet の語源はフランス語の facette（小さな面）で、宝石の切子面を指す。ひとつのデータを属性という「面」から眺める、という発想で検索の用語に転用された。 <a href="#ref1">&#8617;</a></li></ol></section>
+</body>
+</html>
