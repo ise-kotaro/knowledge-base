@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Amazon Inspector とは</title>
+<style>
+body { max-width: 760px; margin: 40px auto; padding: 0 16px;
+       font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+       line-height: 1.8; color: #24292f; }
+h1 { border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: .2em; margin-top: 2em; }
+code { background: #eff1f3; padding: .15em .4em; border-radius: 6px;
+       font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; color: inherit; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
+th { background: #f6f8fa; }
+blockquote { border-left: 4px solid #d0d7de; margin: 0; padding: 0 16px; color: #57606a; }
+a { color: #0969da; }
+hr { border: none; border-top: 1px solid #d0d7de; }
+.footnotes { font-size: .9em; color: #57606a; }
+.footnotes sup { font-size: inherit; }
+</style>
+</head>
+<body>
+<p><small>2026-08-25 / [aws, security, amazon-inspector, vulnerability-management, cloud-security]</small></p>
+<h1>Amazon Inspector とは</h1>
+<h2>概要</h2>
+<p><strong>Amazon Inspector</strong> は AWS の脆弱性管理サービスで、環境内のワークロードを自動検出し、ソフトウェアの脆弱性と意図しないネットワーク公開（外部から到達可能なポート）を継続的にスキャンする。<br>
+従来型のスキャナーのようにスケジュールを組む必要はなく、リソースの変更や新しい CVE<sup id="ref1"><a href="#fn1">[1]</a></sup> の公開といったイベントに反応して再スキャンが自動で走る。<br>
+2021年にフルリニューアルされており、API やコンソールの内部名称には inspector2 / v2 が使われている。</p>
+<h2>スキャン対象</h2>
+<ul><li><strong>EC2 インスタンス</strong>：OS パッケージの脆弱性とネットワーク到達性</li><li><strong>ECR のコンテナイメージ</strong>：イメージ内パッケージの脆弱性（push 時に自動スキャンされ、その後も継続して再スキャンされる）</li><li><strong>Lambda 関数・レイヤー</strong>：依存パッケージの脆弱性に加え、コード自体のスキャン（インジェクションや機密情報の埋め込みなどの検査）にも対応</li><li><strong>コードリポジトリ</strong>：アプリケーションコードや IaC（Terraform のような構成コード）のセキュリティ検査</li><li>Azure の VM、Function Apps、Container Registry（ACR）も対象。料金ページの記載上、マルチクラウドに対応している</li></ul>
+<h2>EC2 の2つのスキャン方式</h2>
+<p>EC2 のパッケージ脆弱性スキャンには、エージェントベースとエージェントレスの2方式がある。<br>
+初回の有効化時は両方式を併用するハイブリッドモードに自動で登録される。</p>
+<ul><li><strong>エージェントベース</strong>：SSM（AWS Systems Manager、EC2 を一元管理するサービス）のエージェントでソフトウェアのインベントリを収集する。新規インスタンスの起動やソフトウェアのインストール、関連 CVE の追加といったイベントで即座に再スキャンされる継続型である。Linux では deep inspection により言語パッケージの脆弱性まで検出できる。前提として、インスタンスが SSM の管理対象になっている必要がある</li><li><strong>エージェントレス</strong>：EBS スナップショットを作成し、EBS direct API で中身を読み取って評価したあと、スナップショットを削除する。SSM 管理外のインスタンスが対象で、24時間ごとにスキャンされる。EBS バックアップでファイルシステムが ext3、ext4、xfs のいずれか、ボリューム数が8個未満で合計1200GB以下、という制約がある</li></ul>
+<p>ネットワーク到達性のスキャンは12時間ごとに実施される。<br>
+スキャン対象から外したいインスタンスには <code>InspectorEc2Exclusion</code> タグを付ける。<br>
+除外したインスタンスには課金されない。</p>
+<h2>finding と Inspector Risk Score</h2>
+<p>脆弱性やネットワーク露出が見つかると <strong>finding</strong>（検出結果）が作られる。<br>
+finding には問題の詳細、影響を受けるリソース、修正の推奨手順が含まれ、修正が完了したことは Inspector 側が検知して自動でクローズする。<br>
+対応しない finding は抑制ルール（suppression rule）で一覧から隠せ、CSV や JSON のレポート出力もできる。</p>
+<p>優先度付けのための指標として <strong>Inspector Risk Score</strong> がある。<br>
+NVD（National Vulnerability Database）が公表する CVSS<sup id="ref2"><a href="#fn2">[2]</a></sup> のベーススコアを、自分の環境に合わせて補正したもので、たとえば「ネットワーク越しに悪用可能な脆弱性だが、その EC2 インスタンスはインターネットから到達不能」ならスコアが下がる。<br>
+理論上の深刻度と実環境でのリスクを分けてくれるので、対応順位のノイズが減る。</p>
+<h2>組織管理と他サービスとの連携</h2>
+<p>AWS Organizations を使っている場合は、委任管理者アカウントから全メンバーアカウントの Inspector を一元管理できる。<br>
+組織への新規参加アカウントに対して自動で有効化する設定も用意されている。</p>
+<p>finding は EventBridge にイベントとして発行され、Lambda や SNS にルーティングしてほぼリアルタイムの自動対応に組み込める。<br>
+AWS Security Hub CSPM を有効化していれば、Inspector の finding は自動的に Security Hub にも集約される。</p>
+<p>このほか、SBOM（ソフトウェア部品表）のエクスポートや、EC2 に対する CIS ベンチマーク（Center for Internet Security によるセキュリティ構成の業界標準）の評価機能もある。<br>
+CIS 評価はオンデマンド実行で、評価ごとの課金になる。</p>
+<h2>料金モデル</h2>
+<p>スキャンしたワークロードに対する従量課金で、ワークロードの種別ごとに課金単位が異なる。<br>
+EC2 は月内の平均インスタンス数（断続的に起動するものは実行時間で按分）、ECR イメージは push 時の初回スキャンと再スキャン回数、CIS 評価はインスタンスごとの評価回数で課金される。<br>
+Jenkins などの CI/CD ツールから実行するオンデマンドのイメージスキャンも課金対象である。<br>
+無料トライアルがある。具体的な単価は料金ページで確認する。</p>
+<h2>類似サービスとの棲み分け</h2>
+<ul><li><strong>Inspector</strong>：脆弱性管理。環境のどこに穴があるかを見つける</li><li><strong>GuardDuty</strong>：脅威検知。今まさに起きている不審な挙動を見つける</li><li><strong>Security Hub</strong>：セキュリティ情報の集約。Inspector など複数サービスの結果を受け止め、ベンチマークとの照合を行う</li></ul>
+<h2>出典</h2>
+<ul><li><a href="https://aws.amazon.com/inspector/">Amazon Inspector（製品ページ）</a></li><li><a href="https://docs.aws.amazon.com/inspector/latest/user/what-is-inspector.html">What is Amazon Inspector? | AWS Documentation</a></li><li><a href="https://docs.aws.amazon.com/inspector/latest/user/scanning-ec2.html">Scanning Amazon EC2 instances | AWS Documentation</a></li><li><a href="https://aws.amazon.com/inspector/pricing/">Amazon Inspector pricing</a></li></ul>
+<section class="footnotes"><hr><ol><li id="fn1">CVE（Common Vulnerabilities and Exposures）は、公知の脆弱性に一意の ID を付与する仕組み。「CVE-2026-12345」のような識別子で個別の脆弱性を指す。 <a href="#ref1">&#8617;</a></li><li id="fn2">CVSS（Common Vulnerability Scoring System）は、脆弱性の深刻度を0から10までの数値で表す共通尺度。 <a href="#ref2">&#8617;</a></li></ol></section>
+</body>
+</html>
